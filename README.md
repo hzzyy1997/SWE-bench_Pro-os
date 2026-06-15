@@ -63,7 +63,7 @@ If you prefer to set up step by step:
 
 ```bash
 # 1. Install dependencies
-brew install docker colima qemu
+brew install docker colima qemu lima-additional-guestagents
 pip install -r requirements.txt
 
 # 2. Start Colima with x86_64 emulation

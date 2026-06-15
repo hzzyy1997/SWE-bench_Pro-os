@@ -62,6 +62,15 @@ install_if_missing docker docker
 install_if_missing colima colima
 install_if_missing qemu-system-x86_64 qemu
 
+# Required for x86_64 emulation on Apple Silicon
+if ! brew list lima-additional-guestagents &>/dev/null; then
+    info "Installing lima-additional-guestagents (required for x86_64 VM)..."
+    brew install lima-additional-guestagents
+    ok "lima-additional-guestagents installed"
+else
+    ok "lima-additional-guestagents already installed"
+fi
+
 # ─── Step 2: Start Colima ───────────────────────────────────────
 info "Starting Colima (x86_64 emulation, ${COLIMA_CPU} CPU, ${COLIMA_MEMORY}GB RAM)..."
 if colima status &>/dev/null; then
