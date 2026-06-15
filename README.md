@@ -37,22 +37,52 @@ swebench = load_dataset('ScaleAI/SWE-bench_Pro', split='test')
 
 ## Installation
 
-### 1. Install Python Dependencies
+### Option A: Local Docker (Recommended)
+
+One-command setup for macOS (Apple Silicon & Intel):
+
+```bash
+chmod +x setup.sh
+./setup.sh
+```
+
+This will automatically:
+1. Install Docker CLI, Colima, and QEMU via Homebrew
+2. Start a Colima VM with x86_64 emulation (SWE-bench images are amd64 only)
+3. Log in to the private image registry
+4. Install Python dependencies
+5. Pull a test image to validate the setup
+
+You can adjust CPU, memory, and disk in the `Configuration` section at the top of `setup.sh`.
+
+> **Note:** For Linux, install [Docker Engine](https://docs.docker.com/engine/install/) directly and skip the Colima/QEMU steps.
+
+#### Manual setup (macOS)
+
+If you prefer to set up step by step:
+
+```bash
+# 1. Install dependencies
+brew install docker colima qemu
+pip install -r requirements.txt
+
+# 2. Start Colima with x86_64 emulation
+colima start --cpu 4 --memory 8 --disk 60 --arch x86_64
+
+# 3. Verify Docker is working
+docker info
+
+# 4. Log in to the image registry
+docker login --username=<your-username> devops-registry.cn-hangzhou.cr.aliyuncs.com
+
+# 5. Stop Colima when done
+colima stop
+```
+
+### Option B: Modal (Cloud)
 
 ```bash
 pip install -r requirements.txt
-```
-
-### 2. Install Docker
-
-SWE-bench Pro uses Docker for reproducible evaluations.
-
-Follow the instructions in the [Docker setup guide](https://docs.docker.com/engine/install/) to install Docker on your machine.
-If you're setting up on Linux, we recommend seeing the [post-installation steps](https://docs.docker.com/engine/install/linux-postinstall/) as well.
-
-### 3. Configure Modal (Recommended) (or use local docker [Beta])
-
-```bash
 modal setup  # Follow the prompts to generate your token
 ```
 
@@ -62,8 +92,6 @@ token_id = <token id>
 token_secret = <token secret>
 active = true
 ```
-
-Beta: Local Docker. No additional setup needed. Use the `--use_local_docker` flag when running evaluations.
 
 ## Docker Images
 
@@ -140,15 +168,28 @@ This will create a JSON file in the format expected by the evaluation script:
 
 Evaluate patch predictions on SWE-Bench Pro:
 
+**Local Docker:**
 ```bash
 python swe_bench_pro_eval.py \
-    --raw_sample_path=swe_bench_pro_full.csv \
+    --raw_sample_path=helper_code/sweap_eval_full_v2.jsonl \
     --patch_path=<your_patches>.json \
     --output_dir=<output_directory> \
     --scripts_dir=run_scripts \
-    --num_workers=100 \
-    --dockerhub_username=jefzda
+    --use_local_docker \
+    --num_workers=4
 ```
+
+**Modal (Cloud):**
+```bash
+python swe_bench_pro_eval.py \
+    --raw_sample_path=helper_code/sweap_eval_full_v2.jsonl \
+    --patch_path=<your_patches>.json \
+    --output_dir=<output_directory> \
+    --scripts_dir=run_scripts \
+    --num_workers=100
+```
+
+Use `--image_registry` to override the default image registry if needed.
 
 You can test with the gold patches, which are in the HuggingFace dataset. There is a helper script in `helper_code` which can extract the gold patches into the required JSON format.
 

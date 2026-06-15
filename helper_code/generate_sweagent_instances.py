@@ -7,8 +7,8 @@ all instances formatted for use with SWE-agent. Each instance includes the Docke
 image name, problem statement, instance ID, base commit, and repo name.
 
 Usage:
-    python generate_sweagent_instances.py --dockerhub_username <your-username>
-    python generate_sweagent_instances.py --dockerhub_username <your-username> --output_path custom_instances.yaml
+    python generate_sweagent_instances.py
+    python generate_sweagent_instances.py --image_registry <registry-prefix> --output_path custom_instances.yaml
 """
 
 import argparse
@@ -18,32 +18,31 @@ from tqdm import tqdm
 from datasets import load_dataset
 
 # Import helper functions from the same directory
-from image_uri import get_dockerhub_image_uri
+from image_uri import get_image_uri, DEFAULT_REGISTRY
 from create_problem_statement import create_problem_statement
 
 
-def generate_instances(dockerhub_username, dataset_split='test'):
+def generate_instances(registry_prefix=DEFAULT_REGISTRY, dataset_split='test'):
     """
     Load SWE-bench Pro dataset and generate instance list.
-    
+
     Args:
-        dockerhub_username: Docker Hub username for image URI generation
+        registry_prefix: Registry prefix for image URI generation
         dataset_split: Which split of the dataset to use (default: 'test')
-        
+
     Returns:
         list: List of instance dictionaries formatted for YAML output
     """
     print(f"Loading SWE-bench Pro dataset (split: {dataset_split})...")
     swebench_pro = load_dataset('ScaleAI/SWE-bench_Pro', split=dataset_split)
-    
+
     instances = []
     print(f"Processing {len(swebench_pro)} instances...")
-    
+
     for row in tqdm(swebench_pro):
-        # Generate Docker Hub image URI
         instance_id = row['instance_id']
         repo_name = row.get('repo', '')
-        image_name = get_dockerhub_image_uri(instance_id, dockerhub_username, repo_name)
+        image_name = get_image_uri(instance_id, registry_prefix, repo_name)
         
         # Create formatted problem statement
         problem_statement = create_problem_statement(row)
@@ -87,21 +86,21 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Generate instances with default settings
-  python generate_sweagent_instances.py --dockerhub_username myusername
-  
-  # Generate instances with custom output path
-  python generate_sweagent_instances.py --dockerhub_username myusername --output_path custom_instances.yaml
-  
+  # Generate instances with default registry
+  python generate_sweagent_instances.py
+
+  # Generate instances with custom registry and output path
+  python generate_sweagent_instances.py --image_registry myregistry/myns --output_path custom_instances.yaml
+
   # Use a different dataset split
-  python generate_sweagent_instances.py --dockerhub_username myusername --dataset_split dev
+  python generate_sweagent_instances.py --dataset_split dev
         """
     )
     
     parser.add_argument(
-        '--dockerhub_username',
-        required=True,
-        help='Docker Hub username for generating image URIs (required)'
+        '--image_registry',
+        default=DEFAULT_REGISTRY,
+        help=f'Registry prefix for generating image URIs (default: {DEFAULT_REGISTRY})'
     )
     
     parser.add_argument(
@@ -124,7 +123,7 @@ def main():
     args = parse_args()
     
     # Generate instances
-    instances = generate_instances(args.dockerhub_username, args.dataset_split)
+    instances = generate_instances(args.image_registry, args.dataset_split)
     
     # Write to YAML file
     write_yaml(instances, args.output_path)

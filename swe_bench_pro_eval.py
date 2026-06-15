@@ -3,18 +3,18 @@ The script is used to evaluate the performance of the SWEAP Pro agent with Modal
 
 This evaluation script:
 1. Takes a CSV file containing test cases and a JSON file containing patches
-2. Runs each patch in a Modal sandbox environment using Docker Hub images
+2. Runs each patch in a Modal sandbox or local Docker container
 3. Executes the tests using local run scripts and collects results
 4. Calculates overall accuracy based on test pass/fail status
 
 Usage:
-python sweap_pro_eval_modal.py \
+python swe_bench_pro_eval.py \
     --raw_sample_path=data.csv \
     --patch_path={OUTPUT}/gold_patches.json \
     --output_dir={OUTPUT}/ \
     --scripts_dir=run_scripts \
     --num_workers=100 \
-    --dockerhub_username=your-username
+    --use_local_docker
 
 It expects:
 - Local run scripts in run_scripts/{instance_id}/run_script.sh
@@ -51,7 +51,7 @@ except Exception:
 import pandas as pd
 from tqdm import tqdm
 
-from helper_code.image_uri import get_dockerhub_image_uri
+from helper_code.image_uri import get_image_uri, DEFAULT_REGISTRY
 
 # Credit: prabhuteja12
 def load_base_docker(iid):
@@ -125,40 +125,6 @@ bash /workspace/run_script.sh {selected_test_files_to_run} > /workspace/stdout.l
 python /workspace/parser.py /workspace/stdout.log /workspace/stderr.log /workspace/output.json
 """
     return entry_script
-
-
-def create_dockerhub_tag(uid, repo_name=""):
-    """
-    Convert instance_id and repo name to Docker Hub compatible tag format.
-    This must match the format used in the upload script.
-
-    Args:
-        uid (str): The instance_id (e.g., "django__django-12345")
-        repo_name (str): The repository name from ECR (e.g., "sweap-images/nodebb.nodebb")
-
-    Returns:
-        str: Docker Hub compatible tag (e.g., "nodebb-nodebb-12345")
-    """
-    if repo_name:
-        # For "NodeBB/NodeBB" -> repo_base="nodebb", repo_name="nodebb" 
-        # Format: {repo_base}.{repo_name}-{OriginalCase}__{OriginalCase}-{hash}-{version}
-        # Example: nodebb.nodebb-NodeBB__NodeBB-7b8bffd763e2155cf88f3ebc258fa68ebe18188d-vf2cf3cbd463b7ad942381f1c6d077626485a1e9e
-        repo_base, repo_name_only = repo_name.lower().split("/")
-        # Keep original case for the instance_id part (after removing "instance_" prefix)
-        hsh = uid.replace("instance_", "")
-        return f"{repo_base}.{repo_name_only}-{hsh}"
-    else:
-        image_name = "default"
-
-    # Extract the tag part from the instance ID
-    # For UIDs that start with a pattern like "django__django-", extract everything after position 9
-    if "__" in uid and len(uid) > 9:
-        tag_part = uid[9:]  # Skip the first 9 characters (e.g., "django__")
-    else:
-        tag_part = uid
-
-    return f"{image_name}-{tag_part}"
-
 
 
 
@@ -276,7 +242,7 @@ def collect_outputs_local(workspace_dir, output_dir, uid, prefix):
         return None
 
 
-def eval_with_modal(patch, sample, output_dir, dockerhub_username, scripts_dir, prefix="", redo=False, block_network=False, docker_platform=None):
+def eval_with_modal(patch, sample, output_dir, registry_prefix, scripts_dir, prefix="", redo=False, block_network=False, docker_platform=None):
     if modal is None:
         raise RuntimeError("modal is not installed. Install it or run with --use_local_docker")
     uid = sample["instance_id"]
@@ -299,11 +265,11 @@ def eval_with_modal(patch, sample, output_dir, dockerhub_username, scripts_dir, 
         app = modal.App.lookup(name="swe-bench-pro-eval", create_if_missing=True)
         
         # Use Docker Hub image instead of ECR
-        dockerhub_image_uri = get_dockerhub_image_uri(uid, dockerhub_username, sample.get("repo", ""))
-        print(f"Using Docker Hub image: {dockerhub_image_uri}")
-        
+        image_uri = get_image_uri(uid, registry_prefix, sample.get("repo", ""))
+        print(f"Using image: {image_uri}")
+
         image = modal.Image.from_registry(
-            dockerhub_image_uri
+            image_uri
         )
 
         sandbox = modal.Sandbox.create(
@@ -355,7 +321,7 @@ def eval_with_modal(patch, sample, output_dir, dockerhub_username, scripts_dir, 
                 pass
 
 
-def eval_with_docker(patch, sample, output_dir, dockerhub_username, scripts_dir, prefix="", redo=False, block_network=False, docker_platform=None):
+def eval_with_docker(patch, sample, output_dir, registry_prefix, scripts_dir, prefix="", redo=False, block_network=False, docker_platform=None):
     if docker is None:
         raise RuntimeError("docker SDK is not installed. Install via 'pip install docker' or run without --use_local_docker")
     uid = sample["instance_id"]
@@ -375,20 +341,20 @@ def eval_with_docker(patch, sample, output_dir, dockerhub_username, scripts_dir,
         write_patch_snapshot(output_dir, uid, prefix, patch)
 
         # Run container via Docker SDK
-        dockerhub_image_uri = get_dockerhub_image_uri(uid, dockerhub_username, sample.get("repo", ""))
-        print(f"Using Docker Hub image: {dockerhub_image_uri}")
+        image_uri = get_image_uri(uid, registry_prefix, sample.get("repo", ""))
+        print(f"Using image: {image_uri}")
 
         client = docker.from_env()
         try:
             if docker_platform:
-                client.images.pull(dockerhub_image_uri, platform=docker_platform)
+                client.images.pull(image_uri, platform=docker_platform)
             else:
-                client.images.pull(dockerhub_image_uri)
+                client.images.pull(image_uri)
         except Exception as pull_err:
             # If pull fails, fall back to a local image if present; otherwise, fail this run
             try:
-                client.images.get(dockerhub_image_uri)
-                print(f"Using locally available image: {dockerhub_image_uri}")
+                client.images.get(image_uri)
+                print(f"Using locally available image: {image_uri}")
             except Exception:
                 print(f"Failed to pull or find image locally for {uid}: {pull_err}")
                 return None
@@ -409,7 +375,7 @@ def eval_with_docker(patch, sample, output_dir, dockerhub_username, scripts_dir,
             run_kwargs["platform"] = docker_platform
 
         container = client.containers.run(
-            dockerhub_image_uri,
+            image_uri,
             **run_kwargs,
         )
 
@@ -438,7 +404,8 @@ def parse_args():
     )
     parser.add_argument("--output_dir", required=True, help="Directory to store evaluation outputs")
     parser.add_argument(
-        "--dockerhub_username", required=True, help="Docker Hub username where sweap-images repository is located"
+        "--image_registry", default=DEFAULT_REGISTRY,
+        help=f"Registry prefix for sweap-images (default: {DEFAULT_REGISTRY})"
     )
     parser.add_argument(
         "--scripts_dir", required=True, help="Directory containing local run scripts (e.g., scripts/run_scripts)"
@@ -525,7 +492,7 @@ def main():
                 patch_sample.get("model_patch", patch_sample.get("patch", "")),
                 raw_sample_df.loc[patch_sample["instance_id"]],
                 args.output_dir,
-                args.dockerhub_username,
+                args.image_registry,
                 args.scripts_dir,
                 prefix=patch_sample.get("prefix", ""),
                 redo=args.redo,
